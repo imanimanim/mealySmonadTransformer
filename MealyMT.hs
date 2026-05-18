@@ -1,3 +1,8 @@
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
+
 module MealyMT where
 
 import Clash.Prelude
@@ -6,65 +11,60 @@ import Control.Monad.Trans.Maybe
 import Data.Functor.Identity
 import qualified Control.Monad.Trans.Class as L
 
-class Monad m => MonadHandler m where
-  unmonad :: s -> o -> m (o, s) -> (o, s) -- s is initial state, o default output
+class Monad m => MonadHandler m s | m -> s where
+  unmonad :: s -> o -> m o -> (s, o) -- s is initial state, o default output
 
-newtype StMa s a = StMa { unStMa :: StateT s (MaybeT Identity) a } -- unwrapper fct
-  deriving (Functor, Applicative, Monad) -- Maybe (s, o)
+runStMa :: StateT s (MaybeT Identity) a -> s -> Maybe (a, s)
+runStMa m s = runIdentity (runMaybeT (runStateT m s))
 
-newtype MaSt s a = MaSt { unMaSt :: MaybeT (StateT s Identity) a }
-  deriving (Functor, Applicative, Monad) -- (s, Maybe o)
+runMaSt :: MaybeT (StateT s Identity) a -> s -> (Maybe a, s)
+runMaSt m s = runIdentity (runStateT (runMaybeT m) s)
 
-runStMa ::StMa s a -> s -> Maybe (a, s)
-runStMa (StMa m) s = runIdentity (runMaybeT (runStateT m s))
-
-runMaSt :: MaSt s a -> s -> (Maybe a, s)
-runMaSt (MaSt m) s = runIdentity (runStateT (runMaybeT m) s)
-
-instance MonadHandler (StMa s) where
+instance MonadHandler (StateT s (MaybeT Identity)) s where
   unmonad s def m =
     case runStMa m s of
-      Nothing      -> (def, s) -- def o, start state
-      Just (o,s')  -> (o, s')
+      Nothing      -> (s, def) -- rollback auf alten state
+      Just (o,s')  -> (s', o)
 
-instance MonadHandler (MaSt s) where
+instance MonadHandler (MaybeT (StateT s Identity)) s where
   unmonad s def m =
     let (res, s') = runMaSt m s
     in case res of
-         Nothing -> (def, s') -- default o, next state
-         Just o  -> (o, s')
+         Nothing -> (s', def) -- neuer state bleibt trotz fehler
+         Just o  -> (s', o)
 
--- tests für StMa MaSt
-
-fStMa :: Int -> StateT Int (MaybeT Identity) Int
-fStMa i = StateT $ \s ->
-  if i == 3
-    then Nothing
-    else
-      let s' = s + i
-      in Just (s', s')
-
-fMaSt :: Int -> StateT Int (MaybeT Identity) Int
-fMaSt = undefined
-
-testStMa = scanl (\(o,s) i -> mealyMT 0 fStMa s i) (0,0) inputs
-testMaSt = scanl (\(o,s) i -> mealyMT 0 fMaSt s i) (0,0) inputs
-
-initState :: Int
-initState = 0
-
-inputs :: [Int]
-inputs = [1,2,3,4,5]
--------------------------------------------------
-
-
--- mealy fkt noch verändern
-mealyMT -- step fct for mealy
-  :: MonadHandler m
-  => o -- default thing
-  -> (i -> StateT s m o)
+mealyMT
+  :: MonadHandler m s
+  => o
+  -> (i -> m o)
   -> s
   -> i
-  -> (o, s)
+  -> (s, o)
 mealyMT def f s i =
-  unmonad s def (runStateT (f i) s)
+  unmonad s def (f i)
+
+
+-------------------- tests --------------------
+
+fSM :: Int -> StateT Int (MaybeT Identity) Int
+fSM x = do
+  s <- get
+  let s' = s + x
+  put s'
+
+  if x < 0
+    then L.lift (MaybeT (pure Nothing))
+    else pure s'
+-- simulate @System (mealy (mealyyMT (999 :: Int) fSM) 0) [1,2,3,-1,5]
+-- [1,3,6,999,11] nach dem fehler wird wieder die 6 als state genommen
+
+fMS :: Int -> MaybeT (StateT Int Identity) Int
+fMS x = do
+  s <- L.lift get
+  let s' = s + x
+  L.lift (put s')
+  if x < 0
+    then MaybeT (pure Nothing)
+    else pure s'
+-- [1,3,6,999,10]
+-- 6 - 1 wird berechnet
