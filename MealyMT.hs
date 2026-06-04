@@ -11,20 +11,44 @@ import Control.Monad.Trans.Maybe
 import Data.Functor.Identity
 import qualified Control.Monad.Trans.Class as L
 
+class Monad m => MealyState s m where
+  getM :: m s
+  putM :: s -> m ()
+  stateM :: (s -> (a,s)) -> m a
+
+{-
+instance MealyState s (State s Identity) where
+  getM = get
+  putM = put
+  stateM = state
+-}
+
+instance MealyState s (StateT s (MaybeT Identity)) where
+  getM = get
+  putM = put
+  stateM = state
+
+instance MealyState s (MaybeT (StateT s Identity)) where
+  getM = L.lift get
+  putM = L.lift . put
+  stateM = L.lift . state
+
+---
+
 class Monad m => MonadHandler m s | m -> s where
   unmonad :: s -> o -> m o -> (s, o) -- s is initial state, o default output
 
 runStMa :: StateT s (MaybeT Identity) a -> s -> Maybe (a, s)
 runStMa m s = runIdentity (runMaybeT (runStateT m s))
 
-runMaSt :: MaybeT (StateT s Identity) a -> s -> (Maybe a, s)
-runMaSt m s = runIdentity (runStateT (runMaybeT m) s)
-
 instance MonadHandler (StateT s (MaybeT Identity)) s where
   unmonad s def m =
     case runStMa m s of
       Nothing      -> (s, def) -- rollback auf alten state
       Just (o,s')  -> (s', o)
+
+runMaSt :: MaybeT (StateT s Identity) a -> s -> (Maybe a, s)
+runMaSt m s = runIdentity (runStateT (runMaybeT m) s)
 
 instance MonadHandler (MaybeT (StateT s Identity)) s where
   unmonad s def m =
@@ -33,16 +57,15 @@ instance MonadHandler (MaybeT (StateT s Identity)) s where
          Nothing -> (s', def) -- neuer state bleibt trotz fehler
          Just o  -> (s', o)
 
-mealyMT
+mealyST
   :: MonadHandler m s
   => o
   -> (i -> m o)
   -> s
   -> i
   -> (s, o)
-mealyMT def f s i =
+mealyST def f s i =
   unmonad s def (f i)
-
 
 -------------------- tests --------------------
 
