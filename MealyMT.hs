@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
 
-module MealyST where
+module Example.MealyST where
 
 import Clash.Prelude
 import Control.Monad.Trans.State
