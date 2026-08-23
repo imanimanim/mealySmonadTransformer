@@ -71,7 +71,7 @@ runStEx m s =
 instance StateComb (StateT s (ExceptT e Identity)) s where
   runComb s def m =
     case runStEx m s of
-      Left _ -> (s, def)
+      Left _ -> (s, def) -- rollback
       Right (o,s') -> (s', o)
 
 -- ============================================================
@@ -88,7 +88,7 @@ runExSt m s =
 instance StateComb (ExceptT e (StateT s Identity)) s where
   runComb s def m =
     case runExSt m s of
-      (Left _, _) -> (s, def) -- rollback
+      (Left _, s') -> (s', def)
       (Right o,s') -> (s', o)
 
 -- ============================================================
