@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
 
-module Example.MealyT where
+module Example.MealyST where
 
 import qualified Prelude as P
 import Clash.Prelude
@@ -92,6 +92,27 @@ instance StateComb (ExceptT e (StateT s Identity)) s where
       (Right o,s') -> (s', o)
 
 -- ============================================================
+-- StateT s (MaybeT (ExceptT e Identity))
+-- ============================================================
+
+runStMaEx
+  :: StateT s (MaybeT (ExceptT e Identity)) a
+  -> s
+  -> Either e (Maybe (a, s))
+runStMaEx m s =
+    runIdentity $ runExceptT $ runMaybeT $ runStateT m s
+
+instance StateComb (StateT s (MaybeT (ExceptT e Identity))) s where
+  runComb s def m =
+    case runStMaEx m s of
+      Left _ ->
+        (s, def)
+      Right Nothing ->
+        (s, def)
+      Right (Just (o, s')) ->
+        (s', o)
+
+-- ============================================================
 -- StateT s (AccumT w Identity)
 -- ============================================================
 
@@ -168,14 +189,14 @@ instance StateComb (WriterT (Sum Int) (StateT Int Identity)) Int where
 -- Mealy machine
 -- ============================================================
 
-mealyT
+mealyST
   :: StateComb m s
   => o
   -> (i -> m o)
   -> s
   -> i
   -> (s, o)
-mealyT def f s i =
+mealyST def f s i =
   runComb s def (f i)
 
 -- ============================================================
@@ -191,7 +212,7 @@ fSM x = do
   if x < 0
     then L.lift (MaybeT (pure Nothing))
     else pure s'
--- simulate @System (mealy (mealyT (999 :: Int) fSM) 0) [1,2,3,-1,5]
+-- simulate @System (mealy (mealyST (999 :: Int) fSM) 0) [1,2,3,-1,5]
 -- [1,3,6,999,11] nach dem fehler wird wieder die 6 als state genommen
 
 fMS :: Int -> MaybeT (StateT Int Identity) Int
@@ -224,7 +245,7 @@ fWS x = do
   pure (s + x)
 
 -- input is state delta
---simulate @System (mealy (mealyT (999 :: Int) fWS) 0) [1,2,3,-1,5]
+--simulate @System (mealy (mealyST (999 :: Int) fWS) 0) [1,2,3,-1,5]
 --[1,3,6,5,10] state changed by the logged delta Sum value each cycle
 
 -- ============================================================
